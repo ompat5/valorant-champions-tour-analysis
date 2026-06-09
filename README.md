@@ -9,3 +9,5 @@ Visualizations Included:
 - **Correlation Matrix of In-Game Stats**: Reveals how different in-game metrics (like ADR, HS%, and KAST) influence each other and impact overall success.
 - **Average Statistics per Agent (Data Table)**: Provides specific statistical benchmarks (like average damage and first engagements) for every agent based on consistent pro-level performance.
 - **Meta Team Compositions**: Showcases the top five agent synergies and compositions used by VCT pros across different maps.
+
+Dataset Source: [Valorant Pro Matches Full Data](https://www.kaggle.com/datasets/visualize25/valorant-pro-matches-full-data/data)
