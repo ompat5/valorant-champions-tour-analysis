@@ -1,0 +1,366 @@
+---
+title: "STAT 442 Final Project"
+author: "Om Patel 20949088"
+date: "2025-04-13"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following code block reads in the initial valorant game data from the SQLite file and creates a few custom columns that will be used later for analysis. First Engagements represents the first action in the round in regards to kills and deaths. Orbs are usually gotten by planting and defusing the spike so thats why OrbGain is the sum of plants and defuses.
+
+```{r,warning=FALSE,message=FALSE}
+library(DBI) 
+library(RSQLite)
+library(dplyr)
+
+# Connect to the SQLite file
+con <- dbConnect(RSQLite::SQLite(), "valorant.sqlite")
+
+# Read game data table
+valorant_game_data <- dbReadTable(con, "Game_Scoreboard")
+
+# Add additional columns 
+valorant_game_data <- valorant_game_data %>%
+  mutate(
+    AgentRole = case_when(
+      Agent %in% c("jett", "phoenix", "raze", "reyna", "yoru") ~ "Duelist",
+      Agent %in% c("sova", "breach", "skye", "kayo") ~ "Initiator",
+      Agent %in% c("killjoy", "cypher", "sage", "chamber") ~ "Sentinel",
+      Agent %in% c("brimstone", "viper", "omen", "astra") ~ "Controller",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  mutate(
+    FirstEngagements = FirstKills + FirstDeaths
+  ) %>%
+  mutate(
+    OrbGain = Plants + Defuses
+  )
+```
+
+The following code block creates 4 radar plots representing the 4 agent categories in valorant, Duelist, Initiator, Sentinel and Controller. This data is not present in the dataset so I added the column in myself in the first code block. After playing the game for a while, I know the responsibilities and characteristics of the different agent roles so I created this plot to showcase it. I understand that controller and sentinel might not seem to have a large impact according to this plot however, their contributions are not easily emphasized in these statistics. Despite that, I believe the plot does well to show the different jobs and responsibilities of every agent role.
+
+I would like this graph to have a larger weight to it. Also, it aligns with option 3.
+
+Option 3: Radar Plots
+```{r, warning=FALSE, message=FALSE, fig.height=6}
+library(tidyverse)
+library(ggradar)
+library(scales)
+library(viridis)
+
+# Obtaining averages of the statistics grouped by agent role
+role_avgs <- valorant_game_data %>% 
+  filter(!is.na(AgentRole)) %>%
+  group_by(AgentRole) %>% 
+  summarise(across(c(ACS, Kills, Deaths, FirstEngagements, Assists, OrbGain), 
+                   mean, na.rm = TRUE)) %>% 
+  ungroup()
+
+# Defining boundaries that do well to showcase the differences in each metric per role
+axis_ranges <- list(
+  ACS = c(150, 250), 
+  Kills = c(11, 18), 
+  Deaths = c(13, 16), 
+  FirstEngagements = c(2, 7),
+  Assists = c(3.5, 7),    
+  OrbGain = c(0.5, 3)
+)
+
+# Scaling function to set domain to [0,1]
+scale_to_custom_range <- function(x, metric) {
+  range <- axis_ranges[[metric]]
+  (x - range[1]) / (range[2] - range[1])
+}
+
+# Apply scaling
+radar_data <- role_avgs %>%
+  mutate(
+    ACS = scale_to_custom_range(ACS, "ACS"),
+    Kills = scale_to_custom_range(Kills, "Kills"),
+    Deaths = scale_to_custom_range(Deaths, "Deaths"),
+    FirstEngagements = scale_to_custom_range(FirstEngagements, "FirstEngagements"),
+    Assists = scale_to_custom_range(Assists, "Assists"),
+    OrbGain = scale_to_custom_range(OrbGain, "OrbGain")
+  ) %>% 
+  rename(group = AgentRole)
+
+# Rename columns
+radar_data <- radar_data %>%
+  rename(
+    "Combat Score" = ACS,
+    "First Engagements" = FirstEngagements,
+    "Orb Gain" = OrbGain
+  )
+
+# Radar Plot
+ggradar(
+  radar_data,
+  axis.label.size = 2.7,
+  group.line.width = 0.5,
+  group.point.size = 2,
+  grid.line.width = 0.5,
+  gridline.min.colour = "black",
+  gridline.mid.colour = "black",
+  gridline.max.colour = "black",
+  grid.label.size = 3,
+  legend.position = "none",
+  values.radar = c("", "", ""),
+  plot.title = "Average Statistics Per Agent Role ",
+  background.circle.colour = "grey",
+  group.colours = viridis(4)
+) +
+  facet_wrap(~Group.1, ncol = 2) +
+  theme(
+    plot.margin = margin(0.1, 0, 0, 0, "cm"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    strip.text = element_text(size = 10, face = "bold"),
+    strip.background = element_rect(fill = "lightgrey")
+  )
+
+```
+
+\newpage
+
+The following code block creates a correlation matrix between the statistics. I really like this plot since it shows which statistics are positively or negatively correlated with other statistics without getting too techincal of the units of measurement and specific statistics which might be harder for newer players to understand.
+
+This plot falls under option 2.
+
+Option 2: Correlation Matrix
+```{r, warning=FALSE, message=FALSE,fig.height=6}
+library(ggcorrplot)
+
+# Stats to find correlation between
+selected_columns <- c(
+  "ACS", "Kills", "Deaths", "Assists", 
+  "FirstKills", "FirstDeaths", 
+  "ADR", "HS_Percent", 
+  "KAST_Percent"
+)
+
+# Filtering data to only include rows without null values
+matrix_data <- valorant_game_data %>%
+  select(all_of(selected_columns)) %>%
+  na.omit() %>% 
+  filter_all(all_vars(. != ""))
+
+corr_matrix <- cor(matrix_data)
+
+# Correlation matrix
+ggcorrplot(corr_matrix, 
+           method = "square",
+           type = "lower",
+           lab = TRUE,
+           lab_size = 4,        
+           colors = viridis(3, option = "C"),
+           title = "Correlation Matrix of Valorant Game Statistics",
+           ggtheme = theme_minimal() +
+             theme(panel.border = element_blank(),      
+                   axis.line.x = element_line(),        
+                   axis.line.y = element_line(),        
+                   axis.ticks = element_line(),        
+                   axis.text = element_text(size = 12, color = "black")),
+           outline.color = "black")
+
+```
+
+\newpage
+
+The following code block creates a table with important statistics per agent. This is more suitable for experienced players that know the metrics of the game and have a better understanding of a player's performance by just their statistics. Since the data set is compiled of pro-player games, this table provides an average for each statistic that a player should strive for on their favourite agent.
+
+This plot fits under option 5.
+
+Option 5:Table of Grammars
+```{r}
+library(gt)
+library(stringr)
+
+# Columns to show
+selected_columns <- c(
+  "ACS", "Kills", "Deaths", "Assists", 
+  "FirstEngagements", "OrbGain",
+  "ADR", "Agent", "AgentRole"
+)
+
+# Filtering data 
+table_data <- valorant_game_data %>%
+  select(all_of(selected_columns)) %>%
+  na.omit() %>% 
+  filter(if_all(everything(), ~ . != ""))
+
+# Group per agent
+table_data <- table_data %>%
+  group_by(Agent, AgentRole) %>%
+  summarise(
+    across(
+      c(ACS, Kills, Deaths, Assists, FirstEngagements, OrbGain, ADR),
+      ~ mean(., na.rm = TRUE)
+    ),
+    .groups = "keep"
+  )
+
+table_data <- table_data %>%
+  # Capitalize first letter
+  mutate(Agent = str_to_title(Agent)) %>%
+  # Round all numeric columns to 3 decimals
+  mutate(across(where(is.numeric), ~ round(., 3)))
+
+# Colours to assign each agent role
+role_colors <- c("Duelist" = "#FDFD96",
+                  "Controller" = "pink",
+                  "Sentinel" = "#90EE90", 
+                  "Initiator" = "#ADD8E6") 
+
+table_data <- as.data.frame(table_data, stringsAsFactors = FALSE)
+table_data[3:6] <- lapply(table_data[3:6], as.numeric)
+
+colnames(table_data) <- c("Agent", "AgentRole", "ACS", "Kills", "Deaths", "Assists", 
+                          "First Engagements", "Orb Gain", "ADR")
+
+table <- table_data %>%
+  arrange(AgentRole, desc(ACS)) %>% 
+  gt() %>%
+  cols_hide(columns = AgentRole) %>%
+  tab_header(
+    title = "Valorant Statistics Per Agent",
+    subtitle = "Sorted by Agent Role and ACS"
+  ) %>%
+  tab_style(
+    style = cell_text(font = google_font("Roboto")),
+    locations = cells_body()
+  ) %>%
+  data_color(
+    columns = Agent,
+    target_columns = Agent,
+    palette = role_colors,
+    fn = function(x) {
+      # mapping between Agent names and their colors
+      agent_role_mapping <- setNames(role_colors[table_data$AgentRole], table_data$Agent)
+      unname(agent_role_mapping[x])
+    }
+  )
+
+table
+```
+
+\newpage
+
+Lastly, the following code blocks use the tier list set up to create a visual showing the best or "meta" team compositions for each map. This allows players to see strong team compositions for certain maps without getting too technical. Firstly, I read in the valorant map data and then join it with the valorant game data so I can see which agents are played on which map. Next, I group by map and count the number of times each agent is played. Lastly, I record the top 5 agents and declare them as the "meta" team composition on that map.
+
+I would like this visual to have a larger weight to it. Also, it aligns with option 4.
+
+Option 4: Tier list
+```{r}
+# Agent data for every game
+agent_data <- valorant_game_data[, c("GameID", "Agent", "AgentRole")]
+agent_data <- agent_data %>%
+  filter(if_all(everything(), ~ !is.na(.) & . != ""))
+
+# Map data for every game
+map_data <- dbReadTable(con, "Games")
+map_data <- map_data[, c("GameID", "Map")]
+
+# Join dataframes so we get agents and maps together
+joined_data <- agent_data %>%
+  inner_join(map_data, by = "GameID") 
+
+# Count 5 most played agents in each map
+top_agents_per_map <- joined_data %>%
+  count(Map, Agent, name = "pick_count") %>%
+  group_by(Map) %>%
+  slice_max(pick_count, n = 5) %>%
+  arrange(Map, desc(pick_count))
+
+# Attach image path for every agent
+top_agents_per_map <- top_agents_per_map %>%
+  mutate(icon_path = paste0("icons/", Agent, ".png"))
+```
+
+```{r}
+library(png)
+library(abind)
+
+tierlist = function(df, tiernames=c("Ascent","Bind","Breeze",
+                                    "Fracture","Haven","Icebox","Split"),
+                    main="Top Agents Per Map")
+{
+ # Background
+  rect(0, 0, 21, 24, col = "black", border = NA)
+
+  # Main title
+  text(10.5, 23, main, col = "white", cex = 5, font = 2)
+  
+  # Establish measurements
+  totalHeight = 24
+  titleHeight = 2
+  totalWidth = 21
+  labelWidth = 3
+  agentDistance = 0.25
+  endSpace = 1
+
+  # Find boundaries
+  remainingHeight = totalHeight - titleHeight - endSpace
+  remainingWidth = totalWidth - labelWidth - endSpace
+  
+  # Draw bar and map label
+  for(k in 1:7)
+  {
+    # Calculate vertical space
+    y_bottom <- remainingHeight - (k) * labelWidth + endSpace
+    y_top <- remainingHeight - (k - 1) * labelWidth + endSpace
+    
+    # Add map image as the background
+    map_image_path <- paste0("icons/", tiernames[k], ".png")
+    img <- readPNG(map_image_path)
+    alpha <- matrix(0.7, nrow=dim(img)[1], ncol=dim(img)[2])
+    img <- abind(img, alpha, along=3)
+    rasterImage(img, xleft = 1, ybottom = y_bottom, 
+                    xright = 20, ytop = y_top)
+    
+    # Shadow so that agent name can be read easily
+    rect(1, y_top - 3, 20, y_top - 2, col = "#0000001A", border = NA)
+    
+    # Map name on left side
+    text(2.5, (y_bottom + y_top) / 2, tiernames[k], col = "white", 
+         cex = 4, font = 2)
+  }
+  
+  x_left = 4
+  y_top = 25
+  
+  # Images and agent names
+  for(k in 1:nrow(df))
+  {
+    # Next row case
+    if (k %% 5 == 1) {
+      y_top = y_top - 3
+      x_left = 4
+    }
+    
+    name = str_to_title(df$Agent[k])
+    img = readPNG(df$icon_path[k])
+
+    # Agent image
+    rasterImage(img, xleft = x_left, ybottom = y_top - 3,
+                    xright = x_left + 3, ytop = y_top)
+    
+    # Agent name
+    text(x_left + 1.5, y_top - 2.5, name, col= "white", cex = 4, font = 2)
+
+    x_left = x_left + labelWidth + agentDistance
+  }
+}
+```
+
+```{r, fig.height=24, fig.width=21}
+
+par(mar = c(0, 0, 0, 0), pty = "s")
+plot.new()
+plot.window(xlim=c(0,21), ylim=c(0,24))
+tierlist(top_agents_per_map)
+```
